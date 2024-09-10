@@ -1,0 +1,117 @@
+/* UserTable.css */
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background-color: #282c34;
+  color: white;
+}
+
+.user-table .historique-column {
+  color: white;
+}
+
+.user-table th
+{
+	border: 1px solid #454b57;
+	padding: 8px;
+	color: white;
+	text-align: center;
+	font-weight: bold;
+}
+
+.user-table td {
+  border: 1px solid #454b57;
+  padding: 1px;
+  color: #363b44;
+  font-weight: bold;
+}
+
+.table-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+
+
+.expand-icon, .collapse-icon {
+  color: #444444;
+}
+
+
+.user-table {
+  /* Styles pour la table */
+}
+
+.collapse-table {
+  margin-top: 0px; /* Remove margin between tables */
+}
+
+/* Couleur de la police pour les classes spécifiques */
+.user-table .deathKnight,
+.user-table .demonHunter,
+.user-table .druid,
+.user-table .hunter,
+.user-table .mage,
+.user-table .monk,
+.user-table .paladin,
+.user-table .priest,
+.user-table .rogue,
+.user-table .shaman,
+.user-table .warlock,
+.user-table .warrior 
+.user-table .evoker{
+  color: black;
+}
+
+.deathKnight {
+  background-color: #C41F3B;
+}
+
+.demonHunter {
+  background-color: #A330C9;
+}
+
+.druid {
+  background-color: #FF7D0A;
+}
+
+.hunter {
+  background-color: #A9D271;
+}
+
+.mage {
+  background-color: #40C7EB;
+}
+
+.monk {
+  background-color: #00FF96;
+}
+
+.paladin {
+  background-color: #F58CBA;
+}
+
+.priest {
+  background-color: #FFFFFF;
+}
+
+.rogue {
+  background-color: #ebdb04;
+}
+
+.shaman {
+  background-color: #0070DE;
+}
+
+.warlock {
+  background-color: #8787ED;
+}
+
+.warrior {
+  background-color: #C79C6E;
+}
+
+.evoker {
+  background-color: #33937F;
+}
