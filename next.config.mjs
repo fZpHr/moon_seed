@@ -9,10 +9,10 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   images: {
-    unoptimized: true, // Tu peux ajuster en fonction de tes besoins
+    unoptimized: true,
   },
-  trailingSlash: true, // Ajoute un slash à la fin des URL
-  target: 'serverless', // Pour rendre le projet compatible avec Netlify
+  trailingSlash: true,
+  target: 'serverless',
 }
 
 export default withNextPlugin(nextConfig)
