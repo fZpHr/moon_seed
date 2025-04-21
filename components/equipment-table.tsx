@@ -92,14 +92,14 @@ type PlayerEquipment = {
   hasPermission: boolean
 }
 
-type RecommendedEquipment = {
+type BisItem = {
   slot: string
   name: string
   source: string
   ilvl: number
   itemId: string
-  quality: "common" | "uncommon" | "rare" | "epic" | "legendary" | "artifact"
-  wowheadId: string // ID pour le lien Wowhead
+  quality: "common" | "uncommon" | "rare" | "epic" | "legendary" | "artifact" | "bis-nm" | "bis-hm" | "bis-mm"
+  notes?: string
 }
 
 // Ajouter les données initiales de secours près du début du fichier, juste après la définition des types
@@ -283,11 +283,6 @@ const getItemLink = (itemId: string) => {
   return `https://example-game.com/items/${itemId}`
 }
 
-// Fonction pour générer un lien vers Wowhead
-const getWowheadLink = (wowheadId: string) => {
-  return `https://www.wowhead.com/item=${wowheadId}`
-}
-
 // Fonction pour obtenir la couleur de classe WoW
 const getClassColor = (classe: string): string => {
   switch (classe.toLowerCase()) {
@@ -377,12 +372,20 @@ const qualityOptions = [
 
 export default function EquipmentTable() {
   const [equipmentData, setEquipmentData] = useState<PlayerEquipment[]>([])
-  const [recommendedEquipment, setRecommendedEquipment] = useState<Record<string, RecommendedEquipment[]>>({})
+  const [bisItems, setBisItems] = useState<Record<string, BisItem[]>>({})
+  const [editingBisItem, setEditingBisItem] = useState<{ playerId: number; index: number } | null>(null)
+  const [showAddBisDialog, setShowAddBisDialog] = useState(false)
+  const [newBisItem, setNewBisItem] = useState<Partial<BisItem>>({
+    slot: "",
+    name: "",
+    source: "",
+    ilvl: 650,
+    itemId: "",
+    quality: "epic"
+  })
+  const [activeBisPlayerId, setActiveBisPlayerId] = useState<number | null>(null)
   const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({})
   const [editMode, setEditMode] = useState(false)
-  const [editingCell, setEditingCell] = useState<{ playerId: number; field: string } | null>(null)
-  const [editValue, setEditValue] = useState("")
-  const [editQuality, setEditQuality] = useState("")
   const [showAddPlayerDialog, setShowAddPlayerDialog] = useState(false)
   const [newPlayer, setNewPlayer] = useState({
     joueur: "",
@@ -394,7 +397,7 @@ export default function EquipmentTable() {
   })
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [viewMode, setViewMode] = useState<"full" | "compact">("full")
+  const [viewMode, setViewMode] = useState<"full" | "compact">("compact")
   const [searchQuery, setSearchQuery] = useState("")
   const [filter, setFilter] = useState<string>("all") // "all", "bis-nm", "bis-hm", etc.
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
@@ -404,14 +407,6 @@ export default function EquipmentTable() {
   const [specFilter, setSpecFilter] = useState<string>("all")
 
   const { isAdmin } = useAuth()
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  // Focus sur l'input quand on entre en mode édition
-  useEffect(() => {
-    if (editingCell && inputRef.current) {
-      inputRef.current.focus()
-    }
-  }, [editingCell])
 
   // Charger les données JSON
   useEffect(() => {
@@ -425,14 +420,23 @@ export default function EquipmentTable() {
         }
         
         const data = await response.json()
+        console.log("Données d'équipement chargées:", data)
         
         // Vérifier que les données sont dans le format attendu
         if (data.players && Array.isArray(data.players) && data.players.length > 0) {
           setEquipmentData(data.players)
           
-          // Stocker les recommandations d'équipement
-          if (data.recommendations) {
-            setRecommendedEquipment(data.recommendations)
+          // Convertir explicitement les IDs en strings pour les bisItems
+          if (data.bisItems) {
+            console.log("BiS items avant conversion:", data.bisItems)
+            const formattedBisItems: Record<string, BisItem[]> = {};
+            
+            Object.entries(data.bisItems).forEach(([key, value]) => {
+              formattedBisItems[String(key)] = value as BisItem[];
+            });
+            
+            console.log("BiS items après conversion:", formattedBisItems)
+            setBisItems(formattedBisItems)
           }
         } else {
           console.warn("Les données reçues ne sont pas valides:", data)
@@ -465,108 +469,10 @@ export default function EquipmentTable() {
   const toggleViewMode = () => {
     const newViewMode = viewMode === "full" ? "compact" : "full"
     setViewMode(newViewMode)
-    
-    // Si on passe en mode compact et qu'on est en mode édition, désactiver l'édition
-    if (newViewMode === "compact" && editMode) {
-      setEditMode(false)
-      setEditingCell(null)
-    }
   }
 
-  const toggleEditMode = () => {
-    if (!isAdmin && viewMode !== "compact") {
-      setEditMode((prev) => !prev)
-      // Si on désactive le mode édition, on annule toute édition en cours
-      if (editMode) {
-        setEditingCell(null)
-      }
-    }
-  }
-
-  const startEditing = (playerId: number, field: string, currentValue: string, quality?: string) => {
-    if (editMode && !isAdmin && viewMode !== "compact") {
-      setEditingCell({ playerId, field })
-      setEditValue(currentValue)
-      if (quality) {
-        setEditQuality(quality)
-      }
-    }
-  }
-
-  // Fonction pour sauvegarder les modifications
-  const saveEdit = () => {
-    if (!editingCell) return
-
-    const { playerId, field } = editingCell
-
-    setEquipmentData((prevData) => {
-      return prevData.map((player) => {
-        if (player.id === playerId) {
-          // Gérer les champs de base du joueur
-          if (field === "joueur" || field === "classe" || field === "specialisation" || field === "role") {
-            return { ...player, [field]: editValue }
-          } else if (field === "ilvl") {
-            return { ...player, [field]: Number.parseInt(editValue) || player.ilvl }
-          } else {
-            // Pour les champs d'équipement
-            const [equipType, subField] = field.split(".")
-            if (subField === "name") {
-              return {
-                ...player,
-                [equipType]: {
-                  ...(player[equipType as keyof PlayerEquipment] as EquipmentItem),
-                  name: editValue,
-                },
-              }
-            } else if (subField === "quality") {
-              // Mettre à jour la qualité et la couleur correspondante
-              let color = ""
-              switch (editQuality) {
-                case "bis-nm":
-                  color = "bg-blue-300"
-                  break
-                case "bis-hm":
-                  color = "bg-yellow-300"
-                  break
-                case "non-bis-hm":
-                  color = "bg-orange-400"
-                  break
-                case "bis-mm":
-                  color = "bg-purple-300"
-                  break
-                case "non-bis-mm":
-                  color = "bg-purple-500"
-                  break
-                default:
-                  color = "bg-gray-200"
-              }
-
-              return {
-                ...player,
-                [equipType]: {
-                  ...(player[equipType as keyof PlayerEquipment] as EquipmentItem),
-                  quality: editQuality as any,
-                  color,
-                },
-              }
-            }
-          }
-        }
-        return player
-      })
-    })
-
-    // Réinitialiser l'état d'édition
-    setEditingCell(null)
-    setEditValue("")
-    setEditQuality("")
-  }
-
-  // Fonction pour annuler l'édition
-  const cancelEdit = () => {
-    setEditingCell(null)
-    setEditValue("")
-    setEditQuality("")
+  const toggleBisEditMode = () => {
+    setEditMode((prev) => !prev)
   }
 
   // Fonction pour ajouter un nouveau joueur
@@ -619,13 +525,6 @@ export default function EquipmentTable() {
       ilvl: 650,
       hasPermission: true,
     })
-  }
-
-  // Fonction pour supprimer un joueur
-  const deletePlayer = (playerId: number) => {
-    if (!isAdmin && editMode) {
-      setEquipmentData((prev) => prev.filter((player) => player.id !== playerId))
-    }
   }
 
   // Fonction pour exporter les données
@@ -713,133 +612,23 @@ export default function EquipmentTable() {
     }
   }, [sortedData]) // Changer la dépendance à sortedData au lieu de equipmentData
 
-  // Modifier la fonction renderEquipmentCell pour corriger "Sah" en "Set" et ajouter l'édition
+  // Modifier la fonction renderEquipmentCell pour supprimer l'édition des items
   const renderEquipmentCell = (item: EquipmentItem, slot: string, playerId: number, equipType: string) => {
     // Classes pour mode compact/normal
     const cellPadding = viewMode === "compact" ? "p-1" : "p-2.5"
     const textSize = viewMode === "compact" ? "text-[10px]" : "text-sm"
     const iconSize = viewMode === "compact" ? "h-2.5 w-2.5" : "h-4 w-4"
     
-    // Si on est en train d'éditer cette cellule
-    if (editingCell && editingCell.playerId === playerId && editingCell.field === `${equipType}.name`) {
-      return (
-        <TableCell className={cn("bg-background/20", getQualityBgClass(item.quality), "border border-border", cellPadding)}>
-          <div className={cn("flex items-center gap-1", viewMode === "compact" ? "flex-wrap" : "")}>
-            {React.cloneElement(getItemIcon(slot), { className: iconSize })}
-            <Input
-              ref={inputRef}
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              className={cn("h-7", textSize, viewMode === "compact" ? "w-[60px] text-xs px-1" : "w-full")}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") saveEdit()
-                if (e.key === "Escape") cancelEdit()
-              }}
-            />
-            <div className={viewMode === "compact" ? "flex mt-1" : ""}>
-              <Button 
-                size="icon" 
-                variant="ghost" 
-                onClick={saveEdit} 
-                className={viewMode === "compact" ? "h-5 w-5" : "h-7 w-7"}
-              >
-                <Check className={viewMode === "compact" ? "h-3 w-3" : "h-4 w-4"} />
-              </Button>
-              <Button 
-                size="icon" 
-                variant="ghost" 
-                onClick={cancelEdit} 
-                className={viewMode === "compact" ? "h-5 w-5" : "h-7 w-7"}
-              >
-                <X className={viewMode === "compact" ? "h-3 w-3" : "h-4 w-4"} />
-              </Button>
-            </div>
-          </div>
-        </TableCell>
-      )
-    }
-
-    if (editingCell && editingCell.playerId === playerId && editingCell.field === `${equipType}.quality`) {
-      return (
-        <TableCell className={cn("bg-background/20", getQualityBgClass(item.quality), "border border-border", cellPadding)}>
-          <div className={cn("flex items-center gap-1", viewMode === "compact" ? "flex-wrap" : "")}>
-            {React.cloneElement(getItemIcon(slot), { className: iconSize })}
-            <div className={cn(viewMode === "compact" ? "w-full" : "flex-1")}>
-              <Select value={editQuality} onValueChange={setEditQuality}>
-                <SelectTrigger className={cn("h-7", textSize, viewMode === "compact" ? "text-xs px-1" : "")}>
-                  <SelectValue placeholder="Qualité" />
-                </SelectTrigger>
-                <SelectContent>
-                  {qualityOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value} className={viewMode === "compact" ? "text-xs" : ""}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className={viewMode === "compact" ? "flex mt-1 justify-end w-full" : ""}>
-              <Button 
-                size="icon" 
-                variant="ghost" 
-                onClick={saveEdit} 
-                className={viewMode === "compact" ? "h-5 w-5" : "h-7 w-7"}
-              >
-                <Check className={viewMode === "compact" ? "h-3 w-3" : "h-4 w-4"} />
-              </Button>
-              <Button 
-                size="icon" 
-                variant="ghost" 
-                onClick={cancelEdit} 
-                className={viewMode === "compact" ? "h-5 w-5" : "h-7 w-7"}
-              >
-                <X className={viewMode === "compact" ? "h-3 w-3" : "h-4 w-4"} />
-              </Button>
-            </div>
-          </div>
-        </TableCell>
-      )
-    }
-
     if (item.name === "x") {
       return (
         <TableCell
           className={cn("bg-background/20", "border border-border", cellPadding, viewMode === "compact" ? "w-[35px]" : "")}
-          onClick={() => editMode && startEditing(playerId, `${equipType}.name`, item.name)}
         >
-          <div className="flex items-center gap-1 group">
+          <div className="flex items-center gap-1">
             {React.cloneElement(getItemIcon(slot), { className: iconSize })}
             <span className={viewMode === "compact" ? "truncate max-w-[30px]" : ""}>
               {item.name}
             </span>
-            {editMode && (
-              <div className="hidden group-hover:flex items-center gap-1">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className={cn("opacity-70 hover:opacity-100", 
-                    viewMode === "compact" ? "h-4 w-4 ml-0.5" : "h-5 w-5 ml-1")}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    startEditing(playerId, `${equipType}.name`, item.name)
-                  }}
-                >
-                  <Edit className={viewMode === "compact" ? "h-2 w-2" : "h-3 w-3"} />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className={cn("opacity-70 hover:opacity-100", 
-                    viewMode === "compact" ? "h-4 w-4" : "h-5 w-5")}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    startEditing(playerId, `${equipType}.quality`, "", item.quality)
-                  }}
-                >
-                  <Sparkles className={viewMode === "compact" ? "h-2 w-2" : "h-3 w-3"} />
-                </Button>
-              </div>
-            )}
           </div>
         </TableCell>
       )
@@ -858,43 +647,14 @@ export default function EquipmentTable() {
             "relative",
             viewMode === "compact" ? "w-[35px]" : ""
           )}
-          onClick={() => editMode && startEditing(playerId, `${equipType}.name`, item.name)}
         >
-          <div className="flex items-center gap-1 group">
+          <div className="flex items-center gap-1">
             <div className={cn("flex items-center gap-1", setQualityClass, textSize)}>
               {React.cloneElement(getItemIcon(slot), { className: iconSize })}
               <span className={cn("font-medium", viewMode === "compact" ? "truncate max-w-[30px]" : "")}>
                 {item.name}
               </span>
             </div>
-            {editMode && (
-              <div className="hidden group-hover:flex items-center gap-1 ml-auto">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className={cn("opacity-70 hover:opacity-100", 
-                    viewMode === "compact" ? "h-4 w-4" : "h-5 w-5")}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    startEditing(playerId, `${equipType}.name`, item.name)
-                  }}
-                >
-                  <Edit className={viewMode === "compact" ? "h-2 w-2" : "h-3 w-3"} />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className={cn("opacity-70 hover:opacity-100", 
-                    viewMode === "compact" ? "h-4 w-4" : "h-5 w-5")}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    startEditing(playerId, `${equipType}.quality`, "", item.quality)
-                  }}
-                >
-                  <Sparkles className={viewMode === "compact" ? "h-2 w-2" : "h-3 w-3"} />
-                </Button>
-              </div>
-            )}
           </div>
         </TableCell>
       )
@@ -903,17 +663,15 @@ export default function EquipmentTable() {
     return (
       <TableCell
         className={cn("bg-background/20", getQualityBgClass(item.quality), "border border-border", cellPadding, viewMode === "compact" ? "w-[35px]" : "")}
-        onClick={() => editMode && startEditing(playerId, `${equipType}.name`, item.name)}
       >
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex items-center gap-1 group">
+              <div className="flex items-center gap-1">
                 <a
                   href={getItemLink(item.itemId)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
                   className={cn("flex items-center gap-1 hover:underline", getQualityClass(item.quality), textSize)}
                 >
                   {React.cloneElement(getItemIcon(slot), { className: iconSize })} 
@@ -921,34 +679,6 @@ export default function EquipmentTable() {
                     {item.name}
                   </span>
                 </a>
-                {editMode && (
-                  <div className="hidden group-hover:flex items-center gap-1">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className={cn("opacity-70 hover:opacity-100", 
-                        viewMode === "compact" ? "h-4 w-4 ml-0.5" : "h-5 w-5 ml-1")}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        startEditing(playerId, `${equipType}.name`, item.name)
-                      }}
-                    >
-                      <Edit className={viewMode === "compact" ? "h-2 w-2" : "h-3 w-3"} />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className={cn("opacity-70 hover:opacity-100", 
-                        viewMode === "compact" ? "h-4 w-4" : "h-5 w-5")}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        startEditing(playerId, `${equipType}.quality`, "", item.quality)
-                      }}
-                    >
-                      <Sparkles className={viewMode === "compact" ? "h-2 w-2" : "h-3 w-3"} />
-                    </Button>
-                  </div>
-                )}
               </div>
             </TooltipTrigger>
             <TooltipContent side="top">
@@ -1204,35 +934,24 @@ export default function EquipmentTable() {
               </>
             )}
           </Button>
-
-          {!isAdmin && viewMode !== "compact" && (
-            <>
-              <Button
-                variant={editMode ? "destructive" : "outline"}
-                onClick={toggleEditMode}
-                className="flex items-center gap-2"
-              >
-                <Edit className="h-4 w-4" />
-                {editMode ? "Quitter l'édition" : "Mode Édition"}
-              </Button>
-              {editMode && (
-                <Button
-                  variant="outline"
-                  onClick={() => setShowAddPlayerDialog(true)}
-                  className="flex items-center gap-2"
-                >
-                  <Plus className="h-4 w-4" />
-                  Ajouter un joueur
-                </Button>
-              )}
-            </>
-          )}
           
-          {!isAdmin && viewMode === "compact" && (
-            <span className="text-xs text-muted-foreground italic">
-              Passez en mode normal pour éditer
-            </span>
-          )}
+          <Button 
+            variant="outline" 
+            onClick={toggleBisEditMode}
+            className="flex items-center gap-2"
+          >
+            {editMode ? (
+              <>
+                <X className="h-4 w-4" />
+                Terminer édition BiS
+              </>
+            ) : (
+              <>
+                <Edit className="h-4 w-4" />
+                Éditer listes BiS
+              </>
+            )}
+          </Button>
 
           <Button variant="outline" onClick={exportData} className="flex items-center gap-2">
             <Download className="h-4 w-4" />
@@ -1357,7 +1076,6 @@ export default function EquipmentTable() {
                   }
                 </div>
               </TableHead>
-              {editMode && <TableHead className={cn("w-10", viewMode === "compact" ? "p-1" : "")}></TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1380,64 +1098,23 @@ export default function EquipmentTable() {
                   </TableCell>
                   <TableCell
                     className={cn("font-medium", viewMode === "compact" ? "p-1 text-xs" : "")}
-                    onClick={() => editMode && startEditing(player.id, "joueur", player.joueur)}
                   >
                     <div className="flex flex-col">
-                      <div className="flex items-center gap-1 group">
+                      <div className="flex items-center gap-1">
                         <span className={viewMode === "compact" ? "truncate max-w-[80px]" : ""}>
                           {player.joueur}
                         </span>
-                        {editMode && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className={cn("opacity-70 hover:opacity-100", 
-                              viewMode === "compact" ? "h-4 w-4 ml-0.5" : "h-5 w-5 ml-1")}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              startEditing(player.id, "joueur", player.joueur)
-                            }}
-                          >
-                            <Edit className={viewMode === "compact" ? "h-2 w-2" : "h-3 w-3"} />
-                          </Button>
-                        )}
                       </div>
-                      <div className={cn("text-xs group", viewMode === "compact" ? "text-[10px] leading-tight truncate max-w-[80px]" : "")}>
+                      <div className={cn("text-xs", viewMode === "compact" ? "text-[10px] leading-tight truncate max-w-[80px]" : "")}>
                         <span className={getClassColor(player.classe)}>{player.classe}</span> - <span className="text-muted-foreground">{player.specialisation}</span>
-                        {editMode && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="opacity-70 hover:opacity-100 h-4 w-4 ml-0.5 inline-flex"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              startEditing(player.id, "classe", player.classe)
-                            }}
-                          >
-                            <Edit className="h-2 w-2" />
-                          </Button>
-                        )}
                       </div>
-                      <div className={cn("text-xs font-medium group", 
+                      <div className={cn("text-xs font-medium", 
                         viewMode === "compact" ? "text-[10px] leading-tight" : "",
                         player.role === "Tank" ? "text-blue-400" : 
                         player.role === "Healer" ? "text-green-400" : 
                         "text-red-400"
                       )}>
                         {player.role}
-                        {editMode && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="opacity-70 hover:opacity-100 h-4 w-4 ml-0.5 inline-flex"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              startEditing(player.id, "role", player.role)
-                            }}
-                          >
-                            <Edit className="h-2 w-2" />
-                          </Button>
-                        )}
                       </div>
                     </div>
                   </TableCell>
@@ -1459,233 +1136,124 @@ export default function EquipmentTable() {
                   {renderEquipmentCell(player.arme2, "arme2", player.id, "arme2")}
                   <TableCell
                     className={cn("text-right font-bold", viewMode === "compact" ? "p-1 text-xs" : "")}
-                    onClick={() => editMode && startEditing(player.id, "ilvl", player.ilvl.toString())}
                   >
-                    <div className="flex items-center justify-end gap-1 group">
-                      {editingCell && editingCell.playerId === player.id && editingCell.field === "ilvl" ? (
-                        <div className="flex items-center gap-1">
-                          <Input
-                            ref={inputRef}
-                            type="number"
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                            className={cn("text-right", 
-                              viewMode === "compact" ? "h-6 w-14 text-xs px-1" : "h-7 w-20")}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") saveEdit()
-                              if (e.key === "Escape") cancelEdit()
-                            }}
-                          />
-                          <Button 
-                            size="icon" 
-                            variant="ghost" 
-                            onClick={saveEdit} 
-                            className={viewMode === "compact" ? "h-5 w-5" : "h-7 w-7"}
-                          >
-                            <Check className={viewMode === "compact" ? "h-3 w-3" : "h-4 w-4"} />
-                          </Button>
-                          <Button 
-                            size="icon" 
-                            variant="ghost" 
-                            onClick={cancelEdit} 
-                            className={viewMode === "compact" ? "h-5 w-5" : "h-7 w-7"}
-                          >
-                            <X className={viewMode === "compact" ? "h-3 w-3" : "h-4 w-4"} />
-                          </Button>
-                        </div>
-                      ) : (
-                        <>
-                          {player.ilvl}
-                          {editMode && (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className={cn("opacity-70 hover:opacity-100", 
-                                viewMode === "compact" ? "h-4 w-4 ml-0.5" : "h-5 w-5 ml-1")}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                startEditing(player.id, "ilvl", player.ilvl.toString())
-                              }}
-                            >
-                              <Edit className={viewMode === "compact" ? "h-2 w-2" : "h-3 w-3"} />
-                            </Button>
-                          )}
-                        </>
-                      )}
-                    </div>
+                    {player.ilvl}
                   </TableCell>
-                  {editMode && (
-                    <TableCell className={viewMode === "compact" ? "p-1" : ""}>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className={cn("text-destructive hover:text-destructive/80", 
-                                     viewMode === "compact" ? "h-6 w-6" : "h-8 w-8")}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          deletePlayer(player.id)
-                        }}
-                      >
-                        <Trash2 className={viewMode === "compact" ? "h-3 w-3" : "h-4 w-4"} />
-                      </Button>
-                    </TableCell>
-                  )}
                 </TableRow>
 
-                {editingCell && editingCell.playerId === player.id && editingCell.field === "joueur" && (
-                  <div className="absolute z-10 bg-background border border-border p-2 rounded-md shadow-md">
-                    <Input
-                      ref={inputRef}
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      className="w-[180px]"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") saveEdit();
-                        if (e.key === "Escape") cancelEdit();
-                      }}
-                    />
-                    <div className="flex justify-end gap-2 mt-2">
-                      <Button size="sm" variant="ghost" onClick={cancelEdit}>
-                        <X className="h-3 w-3 mr-1" /> Annuler
-                      </Button>
-                      <Button size="sm" variant="default" onClick={saveEdit}>
-                        <Check className="h-3 w-3 mr-1" /> Sauvegarder
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {editingCell && editingCell.playerId === player.id && editingCell.field === "classe" && (
-                  <div className="absolute z-10 bg-background border border-border p-2 rounded-md shadow-md">
-                    <Select 
-                      value={editValue} 
-                      onValueChange={(value) => {
-                        setEditValue(value);
-                        // Sauvegarder automatiquement après sélection
-                        setTimeout(saveEdit, 100);
-                      }}
-                    >
-                      <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="Choisir une classe" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Guerrier" className="text-amber-700">Guerrier</SelectItem>
-                        <SelectItem value="Paladin" className="text-pink-400">Paladin</SelectItem>
-                        <SelectItem value="Chasseur" className="text-lime-400">Chasseur</SelectItem>
-                        <SelectItem value="Voleur" className="text-yellow-300">Voleur</SelectItem>
-                        <SelectItem value="Prêtre" className="text-gray-100">Prêtre</SelectItem>
-                        <SelectItem value="Chaman" className="text-blue-500">Chaman</SelectItem>
-                        <SelectItem value="Mage" className="text-sky-400">Mage</SelectItem>
-                        <SelectItem value="Démoniste" className="text-purple-400">Démoniste</SelectItem>
-                        <SelectItem value="Druide" className="text-orange-500">Druide</SelectItem>
-                        <SelectItem value="Chevalier de la mort" className="text-rose-600">Chevalier de la mort</SelectItem>
-                        <SelectItem value="Moine" className="text-emerald-400">Moine</SelectItem>
-                        <SelectItem value="Chasseur de démons" className="text-fuchsia-600">Chasseur de démons</SelectItem>
-                        <SelectItem value="Évocateur" className="text-teal-500">Évocateur</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Button size="sm" variant="ghost" onClick={cancelEdit} className="mt-2">
-                      <X className="h-3 w-3 mr-1" /> Annuler
-                    </Button>
-                  </div>
-                )}
-
-                {editingCell && editingCell.playerId === player.id && editingCell.field === "specialisation" && (
-                  <div className="absolute z-10 bg-background border border-border p-2 rounded-md shadow-md">
-                    <Select 
-                      value={editValue}
-                      onValueChange={(value) => {
-                        setEditValue(value);
-                        // Sauvegarder automatiquement après sélection
-                        setTimeout(saveEdit, 100);
-                      }}
-                      disabled={!player.classe}
-                    >
-                      <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder={!player.classe ? "Choisissez d'abord une classe" : "Choisir une spécialisation"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {player.classe && classSpecializations[player.classe]?.map(spec => (
-                          <SelectItem key={spec} value={spec}>{spec}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button size="sm" variant="ghost" onClick={cancelEdit} className="mt-2">
-                      <X className="h-3 w-3 mr-1" /> Annuler
-                    </Button>
-                  </div>
-                )}
-
-                {editingCell && editingCell.playerId === player.id && editingCell.field === "role" && (
-                  <div className="absolute z-10 bg-background border border-border p-2 rounded-md shadow-md">
-                    <Select 
-                      value={editValue} 
-                      onValueChange={(value) => {
-                        setEditValue(value);
-                        // Sauvegarder automatiquement après sélection
-                        setTimeout(saveEdit, 100);
-                      }}
-                    >
-                      <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="Choisir un rôle" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="DPS">DPS</SelectItem>
-                        <SelectItem value="Tank">Tank</SelectItem>
-                        <SelectItem value="Healer">Healer</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Button size="sm" variant="ghost" onClick={cancelEdit} className="mt-2">
-                      <X className="h-3 w-3 mr-1" /> Annuler
-                    </Button>
-                  </div>
-                )}
-
-                {expandedRows[player.id] && recommendedEquipment[player.id.toString()] && (
+                {expandedRows[player.id] && (
                   <TableRow className="bg-muted/30">
-                    <TableCell colSpan={editMode ? 20 : 19} className="p-4">
-                      <div className="bg-card rounded-md p-4 shadow-sm border border-border">
-                        <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                          <Sword className="h-5 w-5 text-primary" />
-                          Équipement Recommandé pour {player.joueur}
-                          <Badge variant="outline" className="ml-2">
-                            Recommandations Wowhead
-                          </Badge>
-                        </h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          {recommendedEquipment[player.id.toString()].map((item, index) => (
-                            <div key={index} className="bg-muted p-3 rounded-md border border-border">
-                              <div className="flex justify-between items-start mb-2">
-                                <Badge variant="outline" className="mb-1 flex items-center gap-1">
-                                  {getItemIcon(item.slot)} {item.slot}
-                                </Badge>
-                                <Badge className="bg-amber-500">{item.ilvl}</Badge>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <a
-                                  href={getItemLink(item.itemId)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className={cn(
-                                    "font-medium hover:underline block mb-1",
-                                    getQualityClass(item.quality),
-                                  )}
+                    <TableCell colSpan={19} className="p-4">
+                      <div className="space-y-6">        
+                          {/* BiS List Section */}
+                          <div className="bg-card rounded-md p-4 shadow-sm border border-border">
+                            <div className="flex justify-between items-center mb-3">
+                              <h3 className="text-lg font-semibold flex items-center gap-2">
+                                <Sparkles className="h-5 w-5 text-yellow-400" />
+                                Liste Best-in-Slot de {player.joueur}
+                              </h3>
+                              
+                              {/* Only show add button if not a default player */}
+                              {player.id > 2 && !player.joueur.startsWith("DONNEES_") && !player.joueur.startsWith("CREER_") && (
+                                <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  onClick={() => {
+                                    setActiveBisPlayerId(player.id)
+                                    setShowAddBisDialog(true)
+                                  }}
+                                  className="flex items-center gap-1"
                                 >
-                                  {item.name}
-                                </a>
-                                <a
-                                  href={getWowheadLink(item.wowheadId)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-400 hover:text-blue-300 flex items-center"
-                                  title="Voir sur Wowhead"
-                                >
-                                  <ExternalLink className="h-4 w-4" />
-                                </a>
-                              </div>
-                              <p className="text-sm text-muted-foreground">{item.source}</p>
+                                  <Plus className="h-4 w-4" /> Ajouter BiS
+                                </Button>
+                              )}
                             </div>
-                          ))}
+                          
+                          {/* BiS items grid */}
+                          {(() => {
+                            const playerBisItems = bisItems[String(player.id)];
+                            console.log(`Player ${player.id} BiS items:`, playerBisItems);
+                            
+                            return playerBisItems && playerBisItems.length > 0 ? (
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                {playerBisItems.map((item, index) => (
+                                  <div key={index} className={cn("p-3 rounded-md border", getQualityBgClass(item.quality))}>
+                                    <div className="flex justify-between items-start mb-2">
+                                      <Badge variant="outline" className="mb-1 flex items-center gap-1">
+                                        {getItemIcon(item.slot)} {item.slot}
+                                      </Badge>
+                                      <div className="flex items-center gap-1">
+                                        <Badge>{item.ilvl}</Badge>
+                                        {editMode && (
+                                          <Button 
+                                            size="icon" 
+                                            variant="ghost" 
+                                            className="h-6 w-6 text-destructive opacity-80 hover:opacity-100"
+                                            onClick={() => {
+                                              // Remove this BiS item
+                                              setBisItems(prev => {
+                                                const updated = { ...prev }
+                                                updated[player.id.toString()] = updated[player.id.toString()].filter((_, i) => i !== index)
+                                                return updated
+                                              })
+                                            }}
+                                          >
+                                            <Trash2 className="h-3 w-3" />
+                                          </Button>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <a
+                                        href={getItemLink(item.itemId)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className={cn("font-medium hover:underline truncate", getQualityClass(item.quality))}
+                                      >
+                                        {item.name}
+                                      </a>
+                                      {editMode && (
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-6 w-6 opacity-70 hover:opacity-100 ml-auto"
+                                          onClick={() => {
+                                            setEditingBisItem({ playerId: player.id, index })
+                                            setActiveBisPlayerId(player.id)
+                                            setNewBisItem(bisItems[player.id.toString()][index])
+                                            setShowAddBisDialog(true)
+                                          }}
+                                        >
+                                          <Edit className="h-3 w-3" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">{item.source}</p>
+                                    {item.notes && (
+                                      <p className="text-xs mt-1 italic text-muted-foreground">{item.notes}</p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-center p-6 text-muted-foreground">
+                                <p>Aucun élément BiS enregistré.</p>
+                                {editMode && player.id > 2 && !player.joueur.startsWith("DONNEES_") && !player.joueur.startsWith("CREER_") && (
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="mt-2"
+                                    onClick={() => {
+                                      setActiveBisPlayerId(player.id)
+                                      setShowAddBisDialog(true)
+                                    }}
+                                  >
+                                    <Plus className="h-4 w-4 mr-1" /> Ajouter
+                                  </Button>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </TableCell>
@@ -1728,108 +1296,304 @@ export default function EquipmentTable() {
 
       {/* Dialog pour ajouter un nouveau joueur */}
       <Dialog open={showAddPlayerDialog} onOpenChange={setShowAddPlayerDialog}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Ajouter un nouveau joueur</DialogTitle>
-          <DialogDescription>
-            Entrez les informations du nouveau joueur. Vous pourrez modifier son équipement après l'avoir ajouté.
-          </DialogDescription>
-        </DialogHeader>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ajouter un nouveau joueur</DialogTitle>
+            <DialogDescription>
+              Entrez les informations du nouveau joueur. Vous pourrez modifier son équipement après l'avoir ajouté.
+            </DialogDescription>
+          </DialogHeader>
 
-        <div className="grid gap-4 py-4">
-          <div className="grid grid-cols-4 items-center gap-4">
-            <label htmlFor="name" className="text-right">
-              Nom
-            </label>
-            <Input
-              id="name"
-              value={newPlayer.joueur}
-              onChange={(e) => setNewPlayer({ ...newPlayer, joueur: e.target.value })}
-              className="col-span-3"
-            />
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="name" className="text-right">
+                Nom
+              </label>
+              <Input
+                id="name"
+                value={newPlayer.joueur}
+                onChange={(e) => setNewPlayer({ ...newPlayer, joueur: e.target.value })}
+                className="col-span-3"
+              />
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="classe" className="text-right">
+                Classe
+              </label>
+              <Select 
+                value={newPlayer.classe} 
+                onValueChange={(value) => setNewPlayer({ ...newPlayer, classe: value })}
+              >
+                <SelectTrigger id="classe" className="col-span-3">
+                  <SelectValue placeholder="Choisir une classe" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Guerrier" className="text-amber-700">Guerrier</SelectItem>
+                  <SelectItem value="Paladin" className="text-pink-400">Paladin</SelectItem>
+                  <SelectItem value="Chasseur" className="text-lime-400">Chasseur</SelectItem>
+                  <SelectItem value="Voleur" className="text-yellow-300">Voleur</SelectItem>
+                  <SelectItem value="Prêtre" className="text-gray-100">Prêtre</SelectItem>
+                  <SelectItem value="Chaman" className="text-blue-500">Chaman</SelectItem>
+                  <SelectItem value="Mage" className="text-sky-400">Mage</SelectItem>
+                  <SelectItem value="Démoniste" className="text-purple-400">Démoniste</SelectItem>
+                  <SelectItem value="Druide" className="text-orange-500">Druide</SelectItem>
+                  <SelectItem value="Chevalier de la mort" className="text-rose-600">Chevalier de la mort</SelectItem>
+                  <SelectItem value="Moine" className="text-emerald-400">Moine</SelectItem>
+                  <SelectItem value="Chasseur de démons" className="text-fuchsia-600">Chasseur de démons</SelectItem>
+                  <SelectItem value="Évocateur" className="text-teal-500">Évocateur</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="specialisation" className="text-right">
+                Spécialisation
+              </label>
+              <Input
+                id="specialisation"
+                value={newPlayer.specialisation}
+                onChange={(e) => setNewPlayer({ ...newPlayer, specialisation: e.target.value })}
+                className="col-span-3"
+              />
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="role" className="text-right">
+                Rôle
+              </label>
+              <Select 
+                value={newPlayer.role} 
+                onValueChange={(value) => setNewPlayer({ ...newPlayer, role: value })}
+              >
+                <SelectTrigger id="role" className="col-span-3">
+                  <SelectValue placeholder="Choisir un rôle" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="DPS">DPS</SelectItem>
+                  <SelectItem value="Tank">Tank</SelectItem>
+                  <SelectItem value="Healer">Healer</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="ilvl" className="text-right">
+                Niveau d'objet
+              </label>
+              <Input
+                id="ilvl"
+                type="number"
+                value={newPlayer.ilvl}
+                onChange={(e) => setNewPlayer({ ...newPlayer, ilvl: Number.parseInt(e.target.value) || 650 })}
+                className="col-span-3"
+              />
+            </div>
           </div>
-          
-          <div className="grid grid-cols-4 items-center gap-4">
-            <label htmlFor="classe" className="text-right">
-              Classe
-            </label>
-            <Select 
-              value={newPlayer.classe} 
-              onValueChange={(value) => setNewPlayer({ ...newPlayer, classe: value })}
-            >
-              <SelectTrigger id="classe" className="col-span-3">
-                <SelectValue placeholder="Choisir une classe" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Guerrier" className="text-amber-700">Guerrier</SelectItem>
-                <SelectItem value="Paladin" className="text-pink-400">Paladin</SelectItem>
-                <SelectItem value="Chasseur" className="text-lime-400">Chasseur</SelectItem>
-                <SelectItem value="Voleur" className="text-yellow-300">Voleur</SelectItem>
-                <SelectItem value="Prêtre" className="text-gray-100">Prêtre</SelectItem>
-                <SelectItem value="Chaman" className="text-blue-500">Chaman</SelectItem>
-                <SelectItem value="Mage" className="text-sky-400">Mage</SelectItem>
-                <SelectItem value="Démoniste" className="text-purple-400">Démoniste</SelectItem>
-                <SelectItem value="Druide" className="text-orange-500">Druide</SelectItem>
-                <SelectItem value="Chevalier de la mort" className="text-rose-600">Chevalier de la mort</SelectItem>
-                <SelectItem value="Moine" className="text-emerald-400">Moine</SelectItem>
-                <SelectItem value="Chasseur de démons" className="text-fuchsia-600">Chasseur de démons</SelectItem>
-                <SelectItem value="Évocateur" className="text-teal-500">Évocateur</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          
-          <div className="grid grid-cols-4 items-center gap-4">
-            <label htmlFor="specialisation" className="text-right">
-              Spécialisation
-            </label>
-            <Input
-              id="specialisation"
-              value={newPlayer.specialisation}
-              onChange={(e) => setNewPlayer({ ...newPlayer, specialisation: e.target.value })}
-              className="col-span-3"
-            />
-          </div>
-          
-          <div className="grid grid-cols-4 items-center gap-4">
-            <label htmlFor="role" className="text-right">
-              Rôle
-            </label>
-            <Select 
-              value={newPlayer.role} 
-              onValueChange={(value) => setNewPlayer({ ...newPlayer, role: value })}
-            >
-              <SelectTrigger id="role" className="col-span-3">
-                <SelectValue placeholder="Choisir un rôle" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="DPS">DPS</SelectItem>
-                <SelectItem value="Tank">Tank</SelectItem>
-                <SelectItem value="Healer">Healer</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          
-          <div className="grid grid-cols-4 items-center gap-4">
-            <label htmlFor="ilvl" className="text-right">
-              Niveau d'objet
-            </label>
-            <Input
-              id="ilvl"
-              type="number"
-              value={newPlayer.ilvl}
-              onChange={(e) => setNewPlayer({ ...newPlayer, ilvl: Number.parseInt(e.target.value) || 650 })}
-              className="col-span-3"
-            />
-          </div>
-        </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setShowAddPlayerDialog(false)}>
-            Annuler
-          </Button>
-          <Button onClick={addNewPlayer}>Ajouter</Button>
-        </DialogFooter>
-      </DialogContent>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddPlayerDialog(false)}>
+              Annuler
+            </Button>
+            <Button onClick={addNewPlayer}>Ajouter</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog for adding/editing BiS items */}
+      <Dialog open={showAddBisDialog} onOpenChange={setShowAddBisDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editingBisItem ? "Modifier l'élément BiS" : "Ajouter l'élément BiS"}
+            </DialogTitle>
+            <DialogDescription>
+              {editingBisItem 
+                ? "Modifiez les informations de l'élément BiS."
+                : "Entrez les informations du nouvel élément BiS à ajouter à votre liste."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="bis-slot" className="text-right">
+                Emplacement
+              </label>
+              <Select 
+                value={newBisItem.slot} 
+                onValueChange={(value) => setNewBisItem({...newBisItem, slot: value})}
+              >
+                <SelectTrigger id="bis-slot" className="col-span-3">
+                  <SelectValue placeholder="Choisir un emplacement" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Tête">Tête</SelectItem>
+                  <SelectItem value="Cou">Cou</SelectItem>
+                  <SelectItem value="Epaules">Epaules</SelectItem>
+                  <SelectItem value="Cape">Cape</SelectItem>
+                  <SelectItem value="Torse">Torse</SelectItem>
+                  <SelectItem value="Poignets">Poignets</SelectItem>
+                  <SelectItem value="Mains">Mains</SelectItem>
+                  <SelectItem value="Ceinture">Ceinture</SelectItem>
+                  <SelectItem value="Jambes">Jambes</SelectItem>
+                  <SelectItem value="Pieds">Pieds</SelectItem>
+                  <SelectItem value="Anneau 1">Anneau 1</SelectItem>
+                  <SelectItem value="Anneau 2">Anneau 2</SelectItem>
+                  <SelectItem value="Bijou 1">Bijou 1</SelectItem>
+                  <SelectItem value="Bijou 2">Bijou 2</SelectItem>
+                  <SelectItem value="Arme principale">Arme principale</SelectItem>
+                  <SelectItem value="Arme secondaire">Arme secondaire</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="bis-name" className="text-right">
+                Nom de l'objet
+              </label>
+              <Input
+                id="bis-name"
+                value={newBisItem.name}
+                onChange={(e) => setNewBisItem({...newBisItem, name: e.target.value})}
+                className="col-span-3"
+              />
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="bis-source" className="text-right">
+                Source
+              </label>
+              <Input
+                id="bis-source"
+                value={newBisItem.source}
+                onChange={(e) => setNewBisItem({...newBisItem, source: e.target.value})}
+                className="col-span-3"
+                placeholder="Ex: Raid, Donjon, Craft..."
+              />
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="bis-ilvl" className="text-right">
+                Niveau d'objet
+              </label>
+              <Input
+                id="bis-ilvl"
+                type="number"
+                value={newBisItem.ilvl}
+                onChange={(e) => setNewBisItem({...newBisItem, ilvl: Number(e.target.value) || 0})}
+                className="col-span-3"
+              />
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="bis-quality" className="text-right">
+                Qualité
+              </label>
+              <Select 
+                value={newBisItem.quality as string} 
+                onValueChange={(value) => setNewBisItem({...newBisItem, quality: value as any})}
+              >
+                <SelectTrigger id="bis-quality" className="col-span-3">
+                  <SelectValue placeholder="Choisir une qualité" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bis-nm" className="text-blue-300">BiS NM</SelectItem>
+                  <SelectItem value="bis-hm" className="text-yellow-300">BiS HM</SelectItem>
+                  <SelectItem value="bis-mm" className="text-purple-300">BiS MM</SelectItem>
+                  <SelectItem value="epic" className="text-purple-400">Épique</SelectItem>
+                  <SelectItem value="legendary" className="text-orange-400">Légendaire</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="bis-itemid" className="text-right">
+                ID de l'objet
+              </label>
+              <Input
+                id="bis-itemid"
+                value={newBisItem.itemId}
+                onChange={(e) => setNewBisItem({...newBisItem, itemId: e.target.value})}
+                className="col-span-3"
+                placeholder="ID pour le lien (optionnel)"
+              />
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="bis-notes" className="text-right">
+                Notes
+              </label>
+              <Input
+                id="bis-notes"
+                value={newBisItem.notes || ""}
+                onChange={(e) => setNewBisItem({...newBisItem, notes: e.target.value})}
+                className="col-span-3"
+                placeholder="Notes supplémentaires (optionnel)"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setShowAddBisDialog(false)
+              setEditingBisItem(null)
+              setNewBisItem({
+                slot: "",
+                name: "",
+                source: "",
+                ilvl: 650,
+                itemId: "",
+                quality: "epic"
+              })
+            }}>
+              Annuler
+            </Button>
+            <Button onClick={() => {
+              if (!newBisItem.slot || !newBisItem.name) return
+              
+              const bisItem: BisItem = {
+                slot: newBisItem.slot,
+                name: newBisItem.name,
+                source: newBisItem.source || "",
+                ilvl: newBisItem.ilvl || 650,
+                itemId: newBisItem.itemId || "0",
+                quality: newBisItem.quality as any || "epic",
+                ...(newBisItem.notes && { notes: newBisItem.notes })
+              }
+              
+              setBisItems(prev => {
+                const updated = { ...prev }
+                if (editingBisItem) {
+                  // Update existing item
+                  if (!updated[editingBisItem.playerId.toString()]) {
+                    updated[editingBisItem.playerId.toString()] = []
+                  }
+                  updated[editingBisItem.playerId.toString()][editingBisItem.index] = bisItem
+                } else if (activeBisPlayerId) {
+                  // Add new item
+                  if (!updated[activeBisPlayerId.toString()]) {
+                    updated[activeBisPlayerId.toString()] = []
+                  }
+                  updated[activeBisPlayerId.toString()].push(bisItem)
+                }
+                return updated
+              })
+              
+              setShowAddBisDialog(false)
+              setEditingBisItem(null)
+              setNewBisItem({
+                slot: "",
+                name: "",
+                source: "",
+                ilvl: 650,
+                itemId: "",
+                quality: "epic"
+              })
+            }}>
+              {editingBisItem ? "Mettre à jour" : "Ajouter"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
     </div>
   )

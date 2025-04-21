@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import { equipmentData} from './data.js';
-import { recommendedEquipment } from './recommendations.js';
+import { bisItems } from './bisItems.js';
 
 export async function GET() {
   try {
     return NextResponse.json({
       players: equipmentData,
-      recommendations: recommendedEquipment || {}
+      bisItems: bisItems || {}
     });
   } catch (error) {
     console.error('Erreur lors du chargement des données:', error);
