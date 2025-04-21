@@ -1,3 +1,5 @@
+import { withNextPlugin } from '@netlify/plugin-nextjs'
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   eslint: {
@@ -7,15 +9,10 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   images: {
-    unoptimized: true,
+    unoptimized: true, // Tu peux ajuster en fonction de tes besoins
   },
-  trailingSlash: true,
-  exportPathMap: async function (defaultPathMap) {
-    return {
-      ...defaultPathMap,
-      '/': { page: '/' },
-    };
-  },
+  trailingSlash: true, // Ajoute un slash à la fin des URL
+  target: 'serverless', // Pour rendre le projet compatible avec Netlify
 }
 
-export default nextConfig;
+export default withNextPlugin(nextConfig)
