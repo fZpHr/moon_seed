@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useRef, useEffect, useMemo } from "react"
+import React, { useState, useRef, useEffect, useMemo, useCallback } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
   ChevronDown,
@@ -612,88 +612,6 @@ export default function EquipmentTable() {
     }
   }, [sortedData]) // Changer la dépendance à sortedData au lieu de equipmentData
 
-  // Modifier la fonction renderEquipmentCell pour supprimer l'édition des items
-  const renderEquipmentCell = (item: EquipmentItem, slot: string, playerId: number, equipType: string) => {
-    // Classes pour mode compact/normal
-    const cellPadding = viewMode === "compact" ? "p-1" : "p-2.5"
-    const textSize = viewMode === "compact" ? "text-[10px]" : "text-sm"
-    const iconSize = viewMode === "compact" ? "h-2.5 w-2.5" : "h-4 w-4"
-    
-    if (item.name === "x") {
-      return (
-        <TableCell
-          className={cn("bg-background/20", "border border-border", cellPadding, viewMode === "compact" ? "w-[35px]" : "")}
-        >
-          <div className="flex items-center gap-1">
-            {React.cloneElement(getItemIcon(slot), { className: iconSize })}
-            <span className={viewMode === "compact" ? "truncate max-w-[30px]" : ""}>
-              {item.name}
-            </span>
-          </div>
-        </TableCell>
-      )
-    }
-
-    // Traitement spécial pour les items "Set"
-    if (item.name === "Set") {
-      const setQualityClass = getQualityClass(item.quality)
-      
-      return (
-        <TableCell
-          className={cn(
-            "border border-border",
-            cellPadding,
-            getQualityBgClass(item.quality),
-            "relative",
-            viewMode === "compact" ? "w-[35px]" : ""
-          )}
-        >
-          <div className="flex items-center gap-1">
-            <div className={cn("flex items-center gap-1", setQualityClass, textSize)}>
-              {React.cloneElement(getItemIcon(slot), { className: iconSize })}
-              <span className={cn("font-medium", viewMode === "compact" ? "truncate max-w-[30px]" : "")}>
-                {item.name}
-              </span>
-            </div>
-          </div>
-        </TableCell>
-      )
-    }
-
-    return (
-      <TableCell
-        className={cn("bg-background/20", getQualityBgClass(item.quality), "border border-border", cellPadding, viewMode === "compact" ? "w-[35px]" : "")}
-      >
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="flex items-center gap-1">
-                <a
-                  href={getItemLink(item.itemId)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={cn("flex items-center gap-1 hover:underline", getQualityClass(item.quality), textSize)}
-                >
-                  {React.cloneElement(getItemIcon(slot), { className: iconSize })} 
-                  <span className={cn("truncate", viewMode === "compact" ? "max-w-[30px]" : "max-w-full")}>
-                    {item.name}
-                  </span>
-                </a>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              <div className="text-xs">
-                <p className={cn("font-bold", getQualityClass(item.quality))}>{item.name}</p>
-                <p>ID: {item.itemId}</p>
-                <p>Cliquez pour voir les détails</p>
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      </TableCell>
-    )
-  }
-
   // Mettre à jour la légende des couleurs en bas du tableau
   const renderColorLegend = () => {
     return (
@@ -720,6 +638,142 @@ export default function EquipmentTable() {
           </span>
         </p>
       </div>
+    )
+  }
+
+  // Move the isItemBiS function inside the component
+  const isItemBiS = (playerId: number, slot: string, itemName: string): boolean => {
+    const playerBisItems = bisItems[String(playerId)]
+    if (!playerBisItems || playerBisItems.length === 0) return false
+    
+    // Convertir le nom de l'emplacement pour correspondre au format BiS
+    const normalizedSlot = slot.toLowerCase()
+    let bisSlot = ""
+    
+    if (normalizedSlot === "tête") bisSlot = "Tête"
+    else if (normalizedSlot === "cou") bisSlot = "Cou"
+    else if (normalizedSlot === "epaules") bisSlot = "Epaules"
+    else if (normalizedSlot === "cape") bisSlot = "Cape"
+    else if (normalizedSlot === "torse") bisSlot = "Torse"
+    else if (normalizedSlot === "poignets") bisSlot = "Poignets"
+    else if (normalizedSlot === "mains") bisSlot = "Mains"
+    else if (normalizedSlot === "ceinture") bisSlot = "Ceinture"
+    else if (normalizedSlot === "jambes") bisSlot = "Jambes"
+    else if (normalizedSlot === "pieds") bisSlot = "Pieds"
+    else if (normalizedSlot === "anneau1") bisSlot = "Anneau 1"
+    else if (normalizedSlot === "anneau2") bisSlot = "Anneau 2"
+    else if (normalizedSlot === "bijou1") bisSlot = "Bijou 1"
+    else if (normalizedSlot === "bijou2") bisSlot = "Bijou 2"
+    else if (normalizedSlot === "arme1") bisSlot = "Arme principale"
+    else if (normalizedSlot === "arme2") bisSlot = "Arme secondaire"
+    
+    return playerBisItems.some(item => 
+      item.slot.toLowerCase() === bisSlot.toLowerCase() && 
+      item.name.toLowerCase() === itemName.toLowerCase()
+    )
+  }
+
+  // Move the renderEquipmentCell function inside the component
+  const renderEquipmentCell = (item: EquipmentItem, slot: string, playerId: number, equipType: string) => {
+    // Classes pour mode compact/normal
+    const cellPadding = viewMode === "compact" ? "p-1" : "p-2.5"
+    const textSize = viewMode === "compact" ? "text-[10px]" : "text-sm"
+    const iconSize = viewMode === "compact" ? "h-2.5 w-2.5" : "h-4 w-4"
+    
+    // Vérifier si cet item est dans la liste BiS du joueur
+    const isBisItem = isItemBiS(playerId, slot, item.name)
+    
+    if (item.name === "x") {
+      return (
+        <TableCell
+          className={cn("bg-background/20", "border border-border", cellPadding, viewMode === "compact" ? "w-[60px]" : "")}
+        >
+          <div className="flex items-center gap-1">
+            {React.cloneElement(getItemIcon(slot), { className: iconSize })}
+            <span className="whitespace-normal break-words">
+              {item.name}
+            </span>
+          </div>
+        </TableCell>
+      )
+    }
+
+    // Traitement spécial pour les items "Set"
+    if (item.name === "Set") {
+      const setQualityClass = getQualityClass(item.quality)
+      
+      return (
+        <TableCell
+          className={cn(
+            "border border-border",
+            cellPadding,
+            getQualityBgClass(item.quality),
+            "relative",
+            viewMode === "compact" ? "w-[70px]" : "",
+            isBisItem ? "bis-item-cell" : ""
+          )}
+        >
+          <div className="flex items-center">
+            <div className={cn("flex items-center", setQualityClass, textSize)}>
+              {React.cloneElement(getItemIcon(slot), { className: iconSize })}
+              <span className="font-medium whitespace-normal break-words max-w-[80%]">
+                {item.name}
+              </span>
+            </div>
+            {isBisItem && (
+              <Sparkles className={`${viewMode === "compact" ? "h-2 w-2" : "h-3 w-3"} text-yellow-400 ml-0.5 flex-shrink-0`} />
+            )}
+          </div>
+          {isBisItem && <div className="absolute inset-0 bg-yellow-400/10 pointer-events-none" />}
+        </TableCell>
+      )
+    }
+
+    return (
+      <TableCell
+        className={cn(
+          "bg-background/20", 
+          getQualityBgClass(item.quality), 
+          "border border-border", 
+          cellPadding, 
+          viewMode === "compact" ? "w-[80px]" : "", // Augmenté la largeur de 70 à 80px
+          isBisItem ? "relative" : ""
+        )}
+      >
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center justify-between w-full relative">
+                <a
+                  href={getItemLink(item.itemId)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cn("flex items-center hover:underline", getQualityClass(item.quality), textSize)}
+                >
+                  {React.cloneElement(getItemIcon(slot), { className: iconSize })} 
+                  <span className="whitespace-normal break-words max-w-[70%]">
+                    {item.name}
+                  </span>
+                </a>
+                {isBisItem && (
+                  <Sparkles className={`${viewMode === "compact" ? "h-2 w-2" : "h-3 w-3"} text-yellow-400 flex-shrink-0`} />
+                )}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              <div className="text-xs">
+                <p className={cn("font-bold", getQualityClass(item.quality))}>
+                  {item.name} {isBisItem && <span className="text-yellow-400">(BiS!)</span>}
+                </p>
+                <p>ID: {item.itemId}</p>
+                {isBisItem && <p className="text-yellow-400 font-bold">✓ Item BiS obtenu!</p>}
+                <p>Cliquez pour voir les détails</p>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        {isBisItem && <div className="absolute inset-0 bg-yellow-400/10 pointer-events-none" />}
+      </TableCell>
     )
   }
 
@@ -961,11 +1015,11 @@ export default function EquipmentTable() {
       </div>
 
       <div className="w-full overflow-x-auto border rounded-lg border-border">
-        <Table className={viewMode === "compact" ? "table-fixed w-full text-[11px]" : ""}>
+        <Table className={viewMode === "compact" ? "table-fixed w-full text-[11px] min-w-[1200px]" : "min-w-[1200px]"}>
           <TableHeader className="bg-muted">
             <TableRow>
               <TableHead className={cn(viewMode === "compact" ? "w-6 p-1" : "w-10 p-2")}></TableHead>
-              <TableHead className={viewMode === "compact" ? "p-1 w-[70px]" : ""}>
+              <TableHead className={viewMode === "compact" ? "p-1 w-[140px]" : "w-[240px]"}>
                 <span className={viewMode === "compact" ? "text-xs" : ""}>Joueur</span>
               </TableHead>
               <TableHead className={viewMode === "compact" ? "p-1" : ""}>
@@ -1099,16 +1153,32 @@ export default function EquipmentTable() {
                   <TableCell
                     className={cn("font-medium", viewMode === "compact" ? "p-1 text-xs" : "")}
                   >
-                    <div className="flex flex-col">
+                    <div className="flex flex-col w-full">
                       <div className="flex items-center gap-1">
-                        <span className={viewMode === "compact" ? "truncate max-w-[80px]" : ""}>
+                        <span className={viewMode === "compact" ? "w-full break-words" : "w-full break-words"}>
                           {player.joueur}
                         </span>
                       </div>
-                      <div className={cn("text-xs", viewMode === "compact" ? "text-[10px] leading-tight truncate max-w-[80px]" : "")}>
-                        <span className={getClassColor(player.classe)}>{player.classe}</span> - <span className="text-muted-foreground">{player.specialisation}</span>
+                      <div className={cn(
+                        "text-xs w-full", 
+                        viewMode === "compact" ? "text-[10px] leading-tight" : ""
+                      )}>
+                        <span className={cn("break-words w-full", getClassColor(player.classe))}>
+                          {player.classe}
+                        </span>
                       </div>
-                      <div className={cn("text-xs font-medium", 
+                      {player.specialisation && (
+                        <div className={cn(
+                          "text-xs w-full", 
+                          viewMode === "compact" ? "text-[10px] leading-tight" : ""
+                        )}>
+                          <span className="text-muted-foreground break-words w-full">
+                            {player.specialisation}
+                          </span>
+                        </div>
+                      )}
+                      <div className={cn(
+                        "text-xs font-medium w-full", 
                         viewMode === "compact" ? "text-[10px] leading-tight" : "",
                         player.role === "Tank" ? "text-blue-400" : 
                         player.role === "Healer" ? "text-green-400" : 
@@ -1176,64 +1246,112 @@ export default function EquipmentTable() {
                             
                             return playerBisItems && playerBisItems.length > 0 ? (
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                {playerBisItems.map((item, index) => (
-                                  <div key={index} className={cn("p-3 rounded-md border", getQualityBgClass(item.quality))}>
-                                    <div className="flex justify-between items-start mb-2">
-                                      <Badge variant="outline" className="mb-1 flex items-center gap-1">
-                                        {getItemIcon(item.slot)} {item.slot}
-                                      </Badge>
-                                      <div className="flex items-center gap-1">
-                                        <Badge>{item.ilvl}</Badge>
+                                {playerBisItems.map((item, index) => {
+                                  // Vérifier si le joueur a déjà cet item équipé
+                                  const hasItem = (() => {
+                                    const slotName = item.slot.toLowerCase();
+                                    let equipmentSlot = "";
+                                    
+                                    if (slotName.includes("tête")) equipmentSlot = "tete";
+                                    else if (slotName.includes("cou")) equipmentSlot = "cou";
+                                    else if (slotName.includes("epaules")) equipmentSlot = "epaules";
+                                    else if (slotName.includes("cape")) equipmentSlot = "cape";
+                                    else if (slotName.includes("torse")) equipmentSlot = "torse";
+                                    else if (slotName.includes("poignets")) equipmentSlot = "poignets";
+                                    else if (slotName.includes("mains")) equipmentSlot = "mains";
+                                    else if (slotName.includes("ceinture")) equipmentSlot = "ceinture";
+                                    else if (slotName.includes("jambes")) equipmentSlot = "jambes";
+                                    else if (slotName.includes("pieds")) equipmentSlot = "pieds";
+                                    else if (slotName.includes("anneau 1")) equipmentSlot = "anneau1";
+                                    else if (slotName.includes("anneau 2")) equipmentSlot = "anneau2";
+                                    else if (slotName.includes("bijou 1")) equipmentSlot = "bijou1";
+                                    else if (slotName.includes("bijou 2")) equipmentSlot = "bijou2";
+                                    else if (slotName.includes("arme principale")) equipmentSlot = "arme1";
+                                    else if (slotName.includes("arme secondaire")) equipmentSlot = "arme2";
+                                    
+                                    if (!equipmentSlot) return false;
+                                    
+                                    const playerItem = player[equipmentSlot as keyof typeof player] as EquipmentItem;
+                                    return playerItem && playerItem.name.toLowerCase() === item.name.toLowerCase();
+                                  })();
+
+                                  return (
+                                    <div 
+                                      key={index} 
+                                      className={cn(
+                                        "p-3 rounded-md border", 
+                                        getQualityBgClass(item.quality),
+                                        hasItem ? "border-yellow-400 relative" : ""
+                                      )}
+                                    >
+                                      <div className="flex justify-between items-start mb-2">
+                                        <Badge variant="outline" className="mb-1 flex items-center gap-1">
+                                          {getItemIcon(item.slot)} {item.slot}
+                                        </Badge>
+                                        <div className="flex items-center gap-1">
+                                          <Badge>{item.ilvl}</Badge>
+                                          {hasItem && (
+                                            <Badge className="bg-yellow-500/80 text-background">
+                                              <Check className="h-3 w-3 mr-1" /> Obtenu
+                                            </Badge>
+                                          )}
+                                          {editMode && (
+                                            <Button 
+                                              size="icon" 
+                                              variant="ghost" 
+                                              className="h-6 w-6 text-destructive opacity-80 hover:opacity-100"
+                                              onClick={() => {
+                                                // Remove this BiS item
+                                                setBisItems(prev => {
+                                                  const updated = { ...prev }
+                                                  updated[player.id.toString()] = updated[player.id.toString()].filter((_, i) => i !== index)
+                                                  return updated
+                                                })
+                                              }}
+                                            >
+                                              <Trash2 className="h-3 w-3" />
+                                            </Button>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <a
+                                          href={getItemLink(item.itemId)}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className={cn("font-medium hover:underline truncate", getQualityClass(item.quality))}
+                                        >
+                                          {item.name}
+                                        </a>
+                                        {hasItem && (
+                                          <Sparkles className="h-3.5 w-3.5 text-yellow-400 flex-shrink-0" />
+                                        )}
                                         {editMode && (
-                                          <Button 
-                                            size="icon" 
-                                            variant="ghost" 
-                                            className="h-6 w-6 text-destructive opacity-80 hover:opacity-100"
+                                          <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className="h-6 w-6 opacity-70 hover:opacity-100 ml-auto"
                                             onClick={() => {
-                                              // Remove this BiS item
-                                              setBisItems(prev => {
-                                                const updated = { ...prev }
-                                                updated[player.id.toString()] = updated[player.id.toString()].filter((_, i) => i !== index)
-                                                return updated
-                                              })
+                                              setEditingBisItem({ playerId: player.id, index })
+                                              setActiveBisPlayerId(player.id)
+                                              setNewBisItem(bisItems[player.id.toString()][index])
+                                              setShowAddBisDialog(true)
                                             }}
                                           >
-                                            <Trash2 className="h-3 w-3" />
+                                            <Edit className="h-3 w-3" />
                                           </Button>
                                         )}
                                       </div>
-                                    </div>
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <a
-                                        href={getItemLink(item.itemId)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className={cn("font-medium hover:underline truncate", getQualityClass(item.quality))}
-                                      >
-                                        {item.name}
-                                      </a>
-                                      {editMode && (
-                                        <Button
-                                          size="icon"
-                                          variant="ghost"
-                                          className="h-6 w-6 opacity-70 hover:opacity-100 ml-auto"
-                                          onClick={() => {
-                                            setEditingBisItem({ playerId: player.id, index })
-                                            setActiveBisPlayerId(player.id)
-                                            setNewBisItem(bisItems[player.id.toString()][index])
-                                            setShowAddBisDialog(true)
-                                          }}
-                                        >
-                                          <Edit className="h-3 w-3" />
-                                        </Button>
+                                      <p className="text-xs text-muted-foreground">{item.source}</p>
+                                      {item.notes && (
+                                        <p className="text-xs mt-1 italic text-muted-foreground">{item.notes}</p>
+                                      )}
+                                      {hasItem && (
+                                        <div className="absolute inset-0 bg-yellow-400/5 pointer-events-none" />
                                       )}
                                     </div>
-                                    <p className="text-xs text-muted-foreground">{item.source}</p>
-                                    {item.notes && (
-                                      <p className="text-xs mt-1 italic text-muted-foreground">{item.notes}</p>
-                                    )}
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             ) : (
                               <div className="text-center p-6 text-muted-foreground">
