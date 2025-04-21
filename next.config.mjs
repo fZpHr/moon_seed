@@ -1,5 +1,3 @@
-import { withNextPlugin } from '@netlify/plugin-nextjs'
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   eslint: {
@@ -14,5 +12,3 @@ const nextConfig = {
   trailingSlash: true,
   target: 'serverless',
 }
-
-export default withNextPlugin(nextConfig)
