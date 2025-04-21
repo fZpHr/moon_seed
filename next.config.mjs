@@ -10,6 +10,12 @@ const nextConfig = {
     unoptimized: true,
   },
   trailingSlash: true,
+  exportPathMap: async function (defaultPathMap) {
+    return {
+      ...defaultPathMap,
+      '/': { page: '/' },
+    };
+  },
 }
 
-export default nextConfig
+export default nextConfig;
